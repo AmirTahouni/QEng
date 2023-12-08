@@ -1,0 +1,4 @@
+/Users/amirrezatahouni/Projects/OpenRepositories/QEng/build/CMakeFiles/qeng.dir
+/Users/amirrezatahouni/Projects/OpenRepositories/QEng/build/CMakeFiles/main.dir
+/Users/amirrezatahouni/Projects/OpenRepositories/QEng/build/CMakeFiles/edit_cache.dir
+/Users/amirrezatahouni/Projects/OpenRepositories/QEng/build/CMakeFiles/rebuild_cache.dir
