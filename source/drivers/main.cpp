@@ -4,6 +4,7 @@
 #include <vector>
 #include <filesystem>
 #include <random>
+#include <memory>
 
 class ThresholdStrategy : public strategyEngine {
 public:
@@ -12,26 +13,33 @@ public:
         : strategyEngine(Bus), buyThreshold_(buyThreshold), sellThreshold_(sellThreshold) 
     {
         // Subscribe to MarketData events
-        bus.subscribe("MarketData", std::bind(&ThresholdStrategy::onMarketData, this, std::placeholders::_1));
+        //bus.subscribe("MarketData", std::bind(&ThresholdStrategy::onMarketData, this, std::placeholders::_1));
+        //bus.subscribe("MarketData", std::function<void(const marketDataEvent&)>([this](const marketDataEvent& evnt) { this->onMarketData(evnt); }));
+        bus.subscribe("MarketData", [this](event& evnt) 
+        {
+            if (auto marketDataEventPtr = dynamic_cast<marketDataEvent*>(&evnt)) {
+                this->onMarketData(*marketDataEventPtr);
+            }
+        });
         std::cout << "Strategy Subscribed to MarketData events" << std::endl;
     }
 
     // Function to handle MarketData events
-    void onMarketData(const event& evnt)
+    void onMarketData(const marketDataEvent& evnt)
     {
         std::cout << "Received MarketData event for timestamp: " << evnt.timestamp << std::endl;
         // Extract MarketData and generate signals
         const MarketData& marketData = extractMarketData(evnt);
-        bool signal = generateSignal(marketData);
+        std::unordered_map<std::string,double> signal = generateSignal(marketData);
 
         std::string ts = marketData.timestamp;
-        event signalEvent{"Signal", ts, signal ? "Buy" : "Sell"};
+        signalEvent sigEvent{ts, signal};
 
-        bus.publish(signalEvent);
+        bus.publish(sigEvent);
     }
 
     // Override the generateSignal function with the threshold strategy logic
-    bool generateSignal(const MarketData& marketData) override
+    std::unordered_map<std::string,double> generateSignal(const MarketData& marketData) override
     {
         std::random_device rd;
 
@@ -39,20 +47,27 @@ public:
         std::mt19937 gen(rd());
 
         // Define a range for the random numbers (in this case, from 1 to 100)
-        std::uniform_int_distribution<int> distribution(0.5, 1.5);
+        std::uniform_int_distribution<int> distribution(0, 3);
 
         // Generate a random number within the specified range
-        double randNum = distribution(gen);
+        double randNum = distribution(gen)/2.0;
 
         if (marketData.close > marketData.close*randNum) {
             std::cout << "Generated Buy signal for timestamp: " << marketData.timestamp << std::endl;
-            return true;
+            return {
+                {"type",1},
+                {"fraction",0.95}
+            };
         } else if (marketData.close < marketData.close*randNum) {
             std::cout << "Generated Sell signal for timestamp: " << marketData.timestamp << std::endl;
-            return false;
+            return {
+                {"type",2},
+                {"fraction",1.0},
+                {"closePrice",marketData.close}
+            };
         } else {
             std::cout << "No signal generated for timestamp: " << marketData.timestamp << std::endl;
-            return false;
+            return {{"type",0}};
         }
     }
 
@@ -64,18 +79,16 @@ private:
 
 int main() 
 {
-    
     std::filesystem::path crpth=std::filesystem::current_path();
     std::filesystem::path ORpath=crpth.parent_path().parent_path();
     std::filesystem::path HDpath=ORpath/"Backtesting/HistoricalData/4h/converted/bybit/BTCUSDT.csv";
     dataLoader abbas(HDpath);
     std::vector<MarketData> histData=abbas.dataGet();
-    std::cout<<"gotten"<<std::endl;
     eventBus buss;
     ThresholdStrategy myStrategy(buss, 10, 50);
     dataHandler handler(buss,histData);
     broker amirreza(buss);
-
+    std::cout<<"initiation done";
     handler.simulateMarketData();
 
 
