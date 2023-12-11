@@ -10,6 +10,9 @@
 #include <stdlib.h>
 #include <unordered_map>
 #include <memory>
+#include <thread>
+#include <future>
+#include <mutex>
 
 std::string convertTimestamp(const std::string& timestampString, const char* format = "%Y-%m-%d %H:%M:%S") {
     // Convert string to double
@@ -46,8 +49,7 @@ std::string convertTimestamp(const std::string& timestampString, const char* for
 }
 
 struct MarketData 
-{
-    
+{ 
     MarketData(std::string ts, double o, double h, double l, double c, double v):
         timestamp(ts),open(o),high(h),low(l),close(c),volume(v){}
     MarketData():timestamp(""),open(0),high(0),low(0),close(0),volume(0){}
@@ -129,6 +131,137 @@ public:
 private:
     std::filesystem::path filePath;
     std::vector<MarketData> data_;
+};
+
+class ThreadPool {
+public:
+    ThreadPool(std::size_t numThreads) {
+        for (std::size_t i = 0; i < numThreads; ++i) {
+            threads.emplace_back([this]() {
+                while (true) {
+                    std::function<void()> task;
+                    {
+                        std::unique_lock<std::mutex> lock(queueMutex);
+                        condition.wait(lock, [this] { return !tasks.empty() || stop; });
+                        if (stop && tasks.empty()) {
+                            return;
+                        }
+                        task = std::move(tasks.front());
+                        tasks.pop();
+                    }
+                    task();
+                }
+            });
+        }
+    }
+
+    ~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            stop = true;
+        }
+        condition.notify_all();
+        for (auto& thread : threads) {
+            thread.join();
+        }
+    }
+
+    template <class F, class... Args>
+    auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type> {
+        using return_type = typename std::result_of<F(Args...)>::type;
+
+        auto task = std::make_shared<std::packaged_task<return_type()>>(std::bind(std::forward<F>(f), std::forward<Args>(args)...));
+        std::future<return_type> result = task->get_future();
+        {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            if (stop) {
+                throw std::runtime_error("enqueue on stopped ThreadPool");
+            }
+            tasks.emplace([task]() { (*task)(); });
+        }
+        condition.notify_one();
+        return result;
+    }
+
+private:
+    std::vector<std::thread> threads;
+    std::queue<std::function<void()>> tasks;
+    std::mutex queueMutex;
+    std::condition_variable condition;
+    bool stop = false;
+};
+
+class dataLoaderAsync {
+public:
+    dataLoaderAsync(std::filesystem::path path) : filePath(path) 
+    {
+        loadDataAsync();
+    }
+
+    // Optimized function for batch reading and parallel loading
+    void loadDataAsync() {
+        std::ifstream file(filePath, std::ios::binary);
+        if (!file.is_open()) {
+            std::cerr << "Error opening file: " << filePath << std::endl;
+            return;
+        }
+
+        constexpr std::size_t BUFFER_SIZE = 8192; // Adjust the buffer size as needed
+        char buffer[BUFFER_SIZE];
+
+        ThreadPool threadPool(std::thread::hardware_concurrency()); // Use the number of available cores
+
+        while (file.read(buffer, sizeof(buffer))) {
+            // Process the buffer in a thread from the pool
+            threadPool.enqueue(&dataLoaderAsync::processBuffer, this, std::string(buffer, file.gcount()));
+        }
+
+        file.close();
+    }
+
+    std::vector<MarketData> dataGet() {
+        return data_;
+    }
+
+private:
+    std::filesystem::path filePath;
+    std::vector<MarketData> data_;
+    std::mutex dataMutex; // Mutex to ensure thread safety
+
+    void processBuffer(const std::string& buffer) {
+        std::istringstream ss(buffer);
+
+        while (ss) {
+            MarketData data;
+
+            // Read and ignore the timestamp in the original form
+            std::string timestampMisc;
+            std::string tstamp;
+            std::getline(ss, timestampMisc, ','); // Read and discard
+            std::getline(ss, tstamp, ',');
+            data.timestamp = convertTimestamp(tstamp);
+
+            std::string openStr, highStr, lowStr, closeStr, volumeStr;
+
+            std::getline(ss, openStr, ',');    // Open
+            std::getline(ss, highStr, ',');    // High
+            std::getline(ss, lowStr, ',');     // Low
+            std::getline(ss, closeStr, ',');   // Close
+            std::getline(ss, volumeStr, ',');  // Volume
+
+            // Convert string values to doubles
+
+            data.open = std::stod(openStr);
+            data.high = std::stod(highStr);
+            data.low = std::stod(lowStr);
+            data.close = std::stod(closeStr);
+            data.volume = std::stod(volumeStr);
+
+            // Store the parsed data within the critical section
+            std::lock_guard<std::mutex> lock(dataMutex);
+            data_.push_back(data);
+        }
+    }
 };
 
 class event 
