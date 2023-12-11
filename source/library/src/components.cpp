@@ -5,20 +5,19 @@
 #include <string>
 #include "components.h"
 
-void eventBus::subscribe(const std::string& eventType, std::function<void(const event&)> callback)
+void eventBus::subscribe(const std::string& eventType, std::function<void(event&)> callback)
 {
     subscribers[eventType].push_back(callback);
-    std::cout << "Subscribed to event type: " << eventType << std::endl;
 }
 
-void eventBus::publish(const event& event)
+void eventBus::publish(event& evnt)
 {
-    const auto& eventType=event.type;
+    const auto& eventType=evnt.type;
     if (subscribers.find(eventType) != subscribers.end())
     {
         for (const auto& subscriber : subscribers[eventType])
         {
-            subscriber(event);
+            subscriber(evnt);
         }
     }
     else
@@ -31,8 +30,8 @@ void dataHandler::simulateMarketData()
 {
     for (const auto& Data : historicalMarketData) 
     {
-        event marketDataEvent=event("MarketData",Data.timestamp,Data);
-        bus.publish(marketDataEvent);
+        marketDataEvent mDataEvent(Data.timestamp,Data);
+        bus.publish(mDataEvent);
     }
 }
 
@@ -59,70 +58,74 @@ void dataHandler::simulateNextMarketDataEvent()
         return;
     }
 
-    event marketDataEvent{"MarketData", Data.timestamp, Data};
-    bus.publish(marketDataEvent);
+    marketDataEvent mDataEvent{Data.timestamp, Data};
+    bus.publish(mDataEvent);
 }
 
-MarketData strategyEngine::extractMarketData(const event& evnt)
+MarketData strategyEngine::extractMarketData(const marketDataEvent& evnt)
 {
     // Extract relevant fields from the event
     MarketData marketData(
-        evnt.dataMarket.timestamp,
-        evnt.dataMarket.open,
-        evnt.dataMarket.high,
-        evnt.dataMarket.low,
-        evnt.dataMarket.close,
-        evnt.dataMarket.volume
+        evnt.data_.timestamp,
+        evnt.data_.open,
+        evnt.data_.high,
+        evnt.data_.low,
+        evnt.data_.close,
+        evnt.data_.volume
     );
 
     return marketData;
 }
 
-void strategyEngine::onMarketData(const event& evnt) 
+void strategyEngine::onMarketData(const marketDataEvent& evnt) 
 {
     std::cout << "Received MarketData event" << std::endl;
     const MarketData& marketData = strategyEngine::extractMarketData(evnt);
-    bool signal = strategyEngine::generateSignal(marketData);
+    std::unordered_map<std::string,double> signal = strategyEngine::generateSignal(marketData);
 
     std::string ts=marketData.timestamp;
-    event signalEvent{"Signal",ts,signal ? "Buy" : "Sell"};
+    signalEvent sigEvent{ts, {{"type",0}}};
 
-    bus.publish(signalEvent);
+    bus.publish(sigEvent);
 }
 
-bool strategyEngine::generateSignal(const MarketData& marketData)
+std::unordered_map<std::string,double> strategyEngine::generateSignal(const MarketData& marketData)
 {
-    return false;
+    return {{"type",0}};
 }
 
-void broker::onSignal(const event& evnt) {
+void broker::onSignal(const signalEvent& evnt) 
+{
 
     // Check the signal and execute the corresponding order
-    if (evnt.dataSignal == "Buy" && !inPosition) {
-        executeBuyOrder(evnt.dataMarket);
-    } else if (evnt.dataSignal == "Sell" && inPosition) 
+    if (evnt.data_.at("type") == 1.0 && !inPosition) 
     {
-        executeSellOrder(evnt.dataMarket);
+        executeBuyOrder(evnt);
+    } 
+    else if (evnt.data_.at("type") == 2.0 && inPosition) 
+    {
+        executeSellOrder(evnt);
     }
 }
 
-void broker::executeBuyOrder(const MarketData& marketData) 
+//void broker::executeBuyOrder(const MarketData& marketData) 
+void broker::executeBuyOrder(const signalEvent& evnt)
 {
-    double buyAmount = 0.01*cash;
-    cash -= buyAmount;
+    cash -= cash*evnt.data_.at("fraction");
     inPosition = true;
 
-    std::cout << marketData.timestamp<<" | "<< "Executed BUY order | Cash: "<< cash << std::endl;
+    std::cout << evnt.timestamp<<" | "<< "Executed BUY order | Cash: "<< cash << std::endl;
     std::cout<<std::endl;
 }
 
-void broker::executeSellOrder(const MarketData& marketData) {
+void broker::executeSellOrder(const signalEvent& evnt) 
+{
     if(inPosition==true)
     {
-        double sellAmount = cash;
-        cash += sellAmount;
+        cash += asset*evnt.data_.at("fraction")*evnt.data_.at("closePrice");
+        asset=asset-asset*evnt.data_.at("fraction");
         inPosition = false;
     }
-    std::cout << marketData.timestamp<<" | "<< "Executed SELL order | Cash: "<< cash << std::endl;
+    std::cout << evnt.timestamp<<" | "<< "Executed SELL order | Cash: "<< cash << std::endl;
     std::cout<<std::endl;
 }

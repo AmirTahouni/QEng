@@ -7,6 +7,9 @@
 #include <sstream>
 #include <filesystem>
 #include <ctime>
+#include <stdlib.h>
+#include <unordered_map>
+#include <memory>
 
 std::string convertTimestamp(const std::string& timestampString, const char* format = "%Y-%m-%d %H:%M:%S") {
     // Convert string to double
@@ -128,24 +131,49 @@ private:
     std::vector<MarketData> data_;
 };
 
-struct event 
+class event 
 {
+public:
     std::string type;  // Event type (e.g., "MarketData", "Signal")
     std::string timestamp="";
-    MarketData dataMarket={"MarketData",0,0,0,0,0};
-    std::string dataSignal="hold";
+    std::vector<double> data_;
+
+    event(const std::string& ty, const std::string& ts): type(ty), timestamp(ts) {}
+    virtual ~event() = default;
+    // MarketData dataMarket={"MarketData",0,0,0,0,0};
+    // std::unordered_map<std::string,double> signalData {{"type",0}};
     
-    event(std::string ty, std::string ts, MarketData mD): type(ty), timestamp(ts),dataMarket(mD){}
-    event(std::string ty, std::string ts, std::string sigD): type(ty), timestamp(ts),dataSignal(sigD){}
+    // event(std::string ty, std::string ts, MarketData mD): type(ty), timestamp(ts),dataMarket(mD){}
+    
+    // // signal types:
+    // // 0. hold
+    // // 1. buy
+    // // 2. sell
+    // event(std::string ty, std::string ts, std::unordered_map<std::string,double> sigData): type(ty), timestamp(ts), signalData(sigData) {}
+};
+
+struct marketDataEvent : public event {
+    marketDataEvent(const std::string& ts, MarketData data)
+        : event("MarketData", ts), data_(data) {}
+
+    MarketData data_;
+};
+
+struct signalEvent : public event {
+    signalEvent(const std::string& ts, std::unordered_map<std::string, double> data)
+        : event("Signal", ts), data_(data) {}
+
+    std::unordered_map<std::string, double> data_;
 };
 
 class eventBus
 {
 public:
-    void subscribe(const std::string& eventType, std::function<void(const event&)> callback);
-    void publish(const event& event);
+    void subscribe(const std::string& eventType, std::function<void(event&)> callback);
+
+    void publish(event& evnt);
 private:
-    std::unordered_map<std::string, std::vector<std::function<void(const event&)>>> subscribers;
+    std::unordered_map<std::string, std::vector<std::function<void(event&)>>> subscribers;
 };
 
 class dataHandler 
@@ -181,42 +209,54 @@ public:
     explicit strategyEngine(eventBus& Bus) : bus(Bus) 
     {
         // Subscribe to MarketData events
-        bus.subscribe("MarketData", std::bind(&strategyEngine::onMarketData, this, std::placeholders::_1));
-        std::cout << "Subscribed to MarketData events" << std::endl;
+        //bus.subscribe("MarketData", std::bind(&strategyEngine::onMarketData, this, std::placeholders::_1));
+        bus.subscribe("MarketData", [this](event& evnt) 
+        {
+            if (auto marketDataEventPtr = dynamic_cast<marketDataEvent*>(&evnt)) {
+                this->onMarketData(*marketDataEventPtr);
+            }
+        });
     }
 
     // Function to handle MarketData events
-    void onMarketData(const event& evnt);
+    void onMarketData(const marketDataEvent& evnt);
 
     // Function to be overridden by derived classes to implement strategy logic
-    virtual bool generateSignal(const MarketData& marketData);
+    virtual std::unordered_map<std::string,double> generateSignal(const MarketData& marketData);
 
 protected:
     // Helper function to extract MarketData from the event
-    MarketData extractMarketData(const event& evnt);
+    MarketData extractMarketData(const marketDataEvent& evnt);
     eventBus& bus;
 };
 
-class broker {
+class broker 
+{
 public:
     explicit broker(eventBus& Bus) : bus(Bus) {
         // Subscribe to Signal events
-        bus.subscribe("Signal", std::bind(&broker::onSignal, this, std::placeholders::_1));
-        std::cout << "Broker subscribed to Signal events" << std::endl;
+        //bus.subscribe("Signal", std::bind(&broker::onSignal, this, std::placeholders::_1));
+        bus.subscribe("Signal", [this](event& evnt) {
+            if (auto signalEventPtr = dynamic_cast<signalEvent*>(&evnt)) {
+                this->onSignal(*signalEventPtr);
+            }
+        });
+
     }
 
     // Function to handle Signal events
-    void onSignal(const event& evnt);
+    void onSignal(const signalEvent& evnt);
 
     // Function to execute a Buy order
-    void executeBuyOrder(const MarketData& marketData);
+    void executeBuyOrder(const signalEvent& evnt);
 
     // Function to execute a Sell order
-    void executeSellOrder(const MarketData& marketData);
+    void executeSellOrder(const signalEvent& evnt);
 
 private:
     eventBus& bus;
     double cash = 1000.0;  // Initial cash amount for the portfolio
+    double asset = 0;
     bool inPosition = false; // Indicates whether the broker is in position
 };
 
