@@ -86,12 +86,13 @@ int main()
     std::filesystem::path ORpath=crpth.parent_path().parent_path();
     std::filesystem::path HDpath=ORpath/"Backtesting/HistoricalData/1m/converted/bybit/BTCUSDT.csv";
     dataLoader4 abbas(HDpath);
-    std::vector<MarketData> histData=abbas.dataGet();
-    eventBus buss;
-    ThresholdStrategy myStrategy(buss, 10, 50);
-    dataHandler handler(buss,histData);
-    broker amirreza(buss);
-    handler.simulateMarketData();
+    abbas.printData();
+    // std::vector<MarketData> histData=abbas.dataGet();
+    // eventBus buss;
+    // ThresholdStrategy myStrategy(buss, 10, 50);
+    // dataHandler handler(buss,histData);
+    // broker amirreza(buss);
+    // handler.simulateMarketData();
 
     auto end = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
