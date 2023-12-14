@@ -80,36 +80,24 @@ private:
 
 int main() 
 {
+    auto start = std::chrono::high_resolution_clock::now();
+
     std::filesystem::path crpth=std::filesystem::current_path();
     std::filesystem::path ORpath=crpth.parent_path().parent_path();
     std::filesystem::path HDpath=ORpath/"Backtesting/HistoricalData/1m/converted/bybit/BTCUSDT.csv";
-    
-    auto startOld = std::chrono::high_resolution_clock::now();
-    dataLoader abbas(HDpath);
-    auto endOld = std::chrono::high_resolution_clock::now();
-    auto durationOld = std::chrono::duration_cast<std::chrono::milliseconds>(endOld - startOld).count();
+    dataLoader4 abbas(HDpath);
+    std::vector<MarketData> histData=abbas.dataGet();
+    eventBus buss;
+    ThresholdStrategy myStrategy(buss, 10, 50);
+    dataHandler handler(buss,histData);
+    broker amirreza(buss);
+    handler.simulateMarketData();
 
-    auto startNew = std::chrono::high_resolution_clock::now();
-    dataLoaderAsync abbas2(HDpath);
-    auto endNew = std::chrono::high_resolution_clock::now();
-    auto durationNew = std::chrono::duration_cast<std::chrono::milliseconds>(endNew - startNew).count();
-
-    // std::filesystem::path crpth=std::filesystem::current_path();
-    // std::filesystem::path ORpath=crpth.parent_path().parent_path();
-    // std::filesystem::path HDpath=ORpath/"Backtesting/HistoricalData/4h/converted/bybit/BTCUSDT.csv";
-    // dataLoader abbas(HDpath);
-    // dataLoaderASync abbas(HDpath);
-    // std::vector<MarketData> histData=abbas.dataGet();
-    // eventBus buss;
-    // ThresholdStrategy myStrategy(buss, 10, 50);
-    // dataHandler handler(buss,histData);
-    // broker amirreza(buss);
-    // std::cout<<"initiation done";
-    // handler.simulateMarketData();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    std::cout << "Execution time: " << duration << " ms" << std::endl;
 
     
-    std::cout << "Execution time Old: " << durationOld << " ms" << std::endl;
-    std::cout << "Execution time New: " << durationNew << " ms" << std::endl;
 
     return 0;
 }
